@@ -2,13 +2,14 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"time"
 
 	"github.com/MStoykov/mp4"
-	"github.com/MStoykov/mp4/filter"
+	"github.com/MStoykov/mp4/clip"
 	cli "github.com/jawher/mow.cli"
 )
 
@@ -34,7 +35,6 @@ func main() {
 
 	cmd.Command("clip", "Generates a clip", func(cmd *cli.Cmd) {
 		start := cmd.IntOpt("s start", 0, "start time (sec)")
-		duration := cmd.IntOpt("d duration", 10, "duration (sec)")
 		src := cmd.StringArg("SRC", "", "the source file name")
 		dst := cmd.StringArg("DST", "", "the destination file name")
 		cmd.Action = func() {
@@ -55,15 +55,13 @@ func main() {
 				return
 			}
 			defer out.Close()
-			clip, err := filter.Clip(v, time.Duration(*start)*time.Second, time.Duration(*duration)*time.Second)
+			rr := &fileRangeReader{fileName: *src}
+			clip, err := clip.New(v, time.Duration(*start)*time.Second, rr)
 			if err != nil {
 				fmt.Println(err)
 				return
 			}
-			if err := clip.Filter(); err != nil {
-				fmt.Println(err)
-				return
-			}
+			fmt.Scanln()
 			size, err := clip.WriteTo(out)
 			if err != nil {
 				fmt.Println(err)
@@ -96,4 +94,27 @@ func main() {
 	cmd.Run(os.Args)
 	fmt.Println("press return to exit the program")
 	fmt.Scanln()
+}
+
+type fileRangeReader struct {
+	fileName string
+}
+
+func (frr *fileRangeReader) RangeRead(start, length uint64) (io.ReadCloser, error) {
+	file, err := os.Open(frr.fileName)
+	if err != nil {
+		return nil, err
+	}
+	file.Seek(int64(start), os.SEEK_SET)
+	r := &readCloser{Reader: io.LimitReader(file, int64(length)), closeFunc: file.Close}
+	return r, nil
+}
+
+type readCloser struct {
+	io.Reader
+	closeFunc func() error
+}
+
+func (r *readCloser) Close() error {
+	return r.closeFunc()
 }
